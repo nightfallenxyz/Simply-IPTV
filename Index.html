@@ -6,7 +6,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>IPTV Streamer</title>
     <link rel="manifest" href="manifest.json">
+    <!-- Include HLS.js for broader format support -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
+        /* Previous styles remain the same */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
             font-family: -apple-system, sans-serif;
@@ -16,25 +19,21 @@
             display: flex;
             flex-direction: column;
         }
-        
         video {
             width: 100%;
             background: black;
             flex-grow: 1;
         }
-        
         .controls {
             padding: 1rem;
             display: flex;
             flex-direction: column;
             gap: 1rem;
         }
-        
         .input-group {
             display: flex;
             gap: 0.5rem;
         }
-        
         input, select, button {
             padding: 0.8rem;
             font-size: 1rem;
@@ -43,14 +42,11 @@
             background: #333;
             color: white;
         }
-        
         input { flex-grow: 1; }
-        
         button {
             background: #007AFF;
             min-width: 80px;
         }
-        
         .status {
             padding: 0.5rem;
             text-align: center;
@@ -64,7 +60,8 @@
     <div class="controls">
         <div class="input-group">
             <input type="url" id="playlistUrl" 
-                   placeholder="Enter M3U playlist URL">
+                   placeholder="Enter M3U playlist URL"
+                   value="https://example.com/playlist.m3u">
             <button id="loadPlaylist">Load</button>
         </div>
         
@@ -82,9 +79,7 @@
         const player = document.getElementById('player');
         const playlistUrl = document.getElementById('playlistUrl');
         const channelList = document.getElementById('channelList');
-        const loadPlaylistBtn = document.getElementById('loadPlaylist');
-        const pipBtn = document.getElementById('pipBtn');
-        let currentPlaylist = [];
+        let hls = null;
 
         // Register Service Worker
         if ('serviceWorker' in navigator) {
@@ -97,8 +92,8 @@
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('Network error');
                 const data = await response.text();
-                currentPlaylist = parsePlaylist(data);
-                updateChannelList(currentPlaylist);
+                const channels = parsePlaylist(data);
+                updateChannelList(channels);
                 channelList.disabled = false;
                 pipBtn.disabled = false;
                 showStatus('Playlist loaded');
@@ -113,11 +108,18 @@
             
             for (let i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('#EXTINF:-1')) {
-                    const channel = {
-                        name: lines[i].match(/tvg-name="([^"]+)/)?.[1] || 'Unknown',
-                        url: lines[i+1]?.trim()
-                    };
-                    if (channel.url) channels.push(channel);
+                    // Handle both formats: with tvg-name and simple format
+                    const nameMatch = lines[i].match(/tvg-name="([^"]+)/) || 
+                                    lines[i].match(/,(.*)/);
+                    const url = lines[i+1]?.trim();
+                    
+                    if (nameMatch && url) {
+                        channels.push({
+                            name: nameMatch[1].trim(),
+                            url: url
+                        });
+                        i++; // Skip next line (the URL line)
+                    }
                 }
             }
             return channels;
@@ -133,6 +135,30 @@
             });
         }
 
+        function playStream(url) {
+            if (hls) {
+                hls.destroy();
+            }
+
+            if (url.includes('.m3u8')) {
+                // Handle HLS streams
+                if (Hls.isSupported()) {
+                    hls = new Hls();
+                    hls.loadSource(url);
+                    hls.attachMedia(player);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => player.play());
+                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Native Safari support
+                    player.src = url;
+                    player.play();
+                }
+            } else {
+                // Direct video formats
+                player.src = url;
+                player.play();
+            }
+        }
+
         function showStatus(message, isError = false) {
             const status = document.getElementById('status');
             status.textContent = message;
@@ -140,7 +166,7 @@
         }
 
         // Event Listeners
-        loadPlaylistBtn.addEventListener('click', () => {
+        document.getElementById('loadPlaylist').addEventListener('click', () => {
             if (playlistUrl.checkValidity()) {
                 loadPlaylist(playlistUrl.value);
             }
@@ -148,14 +174,16 @@
 
         channelList.addEventListener('change', () => {
             if (channelList.value) {
-                player.src = channelList.value;
-                player.play().catch(error => {
+                try {
+                    playStream(channelList.value);
+                    showStatus('Loading stream...');
+                } catch (error) {
                     showStatus(`Playback error: ${error.message}`, true);
-                });
+                }
             }
         });
 
-        pipBtn.addEventListener('click', async () => {
+        document.getElementById('pipBtn').addEventListener('click', async () => {
             try {
                 if (document.pictureInPictureElement) {
                     await document.exitPictureInPicture();
@@ -167,9 +195,8 @@
             }
         });
 
-        // Initialize
-        player.addEventListener('play', () => {
-            pipBtn.disabled = false;
+        player.addEventListener('error', () => {
+            showStatus('Playback error: Unsupported format or network issue', true);
         });
     </script>
 </body>
