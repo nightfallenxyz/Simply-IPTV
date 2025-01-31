@@ -1,9 +1,8 @@
-const CACHE_NAME = 'iptv-v1';
+const CACHE_NAME = 'iptv-v2';
 const ASSETS = [
     '/',
     '/index.html',
-    '/styles.css',
-    '/icon.png'
+    '/manifest.json'
 ];
 
 self.addEventListener('install', (e) => {
