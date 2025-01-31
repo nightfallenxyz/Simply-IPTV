@@ -53,7 +53,7 @@
     </style>
 </head>
 <body>
-    <video id="player" controls playsinline></video>
+    <video id="player" controls playsinline muted></video>
     
     <div class="controls">
         <div class="input-group">
@@ -68,6 +68,7 @@
                 <option value="">Select Channel</option>
             </select>
             <button id="pipBtn" disabled>PiP</button>
+            <button id="playBtn" disabled>▶️ Play</button>
         </div>
     </div>
     
@@ -78,24 +79,69 @@
         const player = document.getElementById('player');
         let hls = null;
 
-        // Service Worker Registration
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
-        }
-
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
-                const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
+                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                const response = await fetchWithRetry(proxyUrl);
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
+                
                 const channels = parsePlaylist(data);
+                if (channels.length === 0) throw new Error('No valid channels found');
                 
                 updateChannelList(channels);
-                document.getElementById('channelList').disabled = false;
-                document.getElementById('pipBtn').disabled = false;
+                enableControls();
                 showStatus(`Loaded ${channels.length} channels`);
+                console.log('Parsed channels:', channels);
             } catch (error) {
                 showStatus(`Error: ${error.message}`, true);
+                console.error('Playlist load error:', error);
+            }
+        }
+
+        async function playStream(url) {
+            try {
+                showStatus('Initializing stream...');
+                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                
+                if (hls) {
+                    hls.destroy();
+                    hls = null;
+                }
+
+                if (proxyUrl.includes('.m3u8')) {
+                    if (Hls.isSupported()) {
+                        hls = new Hls({
+                            debug: true,
+                            xhrSetup: (xhr) => {
+                                xhr.withCredentials = false;
+                            }
+                        });
+                        
+                        hls.on(Hls.Events.ERROR, (event, data) => {
+                            console.error('HLS error:', data);
+                            showStatus(`Stream error: ${data.type}`, true);
+                        });
+                        
+                        hls.loadSource(proxyUrl);
+                        hls.attachMedia(player);
+                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                            showStatus('Ready to play');
+                            document.getElementById('playBtn').disabled = false;
+                        });
+                    } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+                        player.src = proxyUrl;
+                        document.getElementById('playBtn').disabled = false;
+                    }
+                } else {
+                    player.src = proxyUrl;
+                    document.getElementById('playBtn').disabled = false;
+                }
+            } catch (error) {
+                showStatus(`Playback error: ${error.message}`, true);
+                console.error('Playback error:', error);
             }
         }
 
@@ -121,33 +167,6 @@
             return channels;
         }
 
-        function playStream(url) {
-            if (hls) {
-                hls.destroy();
-            }
-
-            showStatus('Loading stream...');
-            const finalUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-
-            if (url.includes('.m3u8')) {
-                if (Hls.isSupported()) {
-                    hls = new Hls();
-                    hls.loadSource(finalUrl);
-                    hls.attachMedia(player);
-                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        player.play();
-                        showStatus('Playing...');
-                    });
-                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
-                    player.src = finalUrl;
-                    player.play();
-                }
-            } else {
-                player.src = finalUrl;
-                player.play();
-            }
-        }
-
         function updateChannelList(channels) {
             const channelList = document.getElementById('channelList');
             channelList.innerHTML = '<option value="">Select Channel</option>';
@@ -164,6 +183,25 @@
             document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
         }
 
+        function enableControls() {
+            document.getElementById('channelList').disabled = false;
+            document.getElementById('pipBtn').disabled = false;
+            document.getElementById('playBtn').disabled = false;
+        }
+
+        async function fetchWithRetry(url, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response;
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+                }
+            }
+        }
+
         // Event Listeners
         document.getElementById('loadPlaylist').addEventListener('click', () => {
             const url = document.getElementById('playlistUrl').value;
@@ -174,6 +212,15 @@
             if (e.target.value) playStream(e.target.value);
         });
 
+        document.getElementById('playBtn').addEventListener('click', async () => {
+            try {
+                await player.play();
+                showStatus('Playing...');
+            } catch (error) {
+                showStatus(`Play failed: ${error.message}`, true);
+            }
+        });
+
         document.getElementById('pipBtn').addEventListener('click', async () => {
             try {
                 if (document.pictureInPictureElement) {
@@ -182,7 +229,7 @@
                     await player.requestPictureInPicture();
                 }
             } catch (error) {
-                showStatus(`PiP Error: ${error.message}`, true);
+                showStatus(`PiP failed: ${error.message}`, true);
             }
         });
 
