@@ -83,13 +83,14 @@
     <script>
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
         let player = null;
-        let currentPlaylist = [];
 
-        // Initialize Shaka Player
-        function initPlayer() {
+        async function initPlayer() {
             const video = document.getElementById('videoPlayer');
+            
+            // Initialize Shaka Player
             player = new shaka.Player(video);
             
+            // Configure player
             player.configure({
                 streaming: {
                     retryParameters: {
@@ -107,88 +108,96 @@
                 }
             });
 
-            player.addEventListener('error', onPlayerError);
-            
-            // Auto-load the default playlist
-            loadPlaylist(document.getElementById('playlistUrl').value);
+            // Load default playlist
+            try {
+                await loadPlaylist(document.getElementById('playlistUrl').value);
+            } catch (error) {
+                showStatus(`Initial load failed: ${error.message}`, true);
+            }
         }
 
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                const response = await fetchWithTimeout(proxyUrl, 15000);
-                
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const response = await fetchWithRetry(url);
                 const data = await response.text();
                 
-                currentPlaylist = parsePlaylist(data);
-                if (currentPlaylist.length === 0) throw new Error('No valid channels found');
+                const channels = parsePlaylist(data);
+                if (channels.length === 0) throw new Error('No valid channels found');
                 
-                updateChannelList(currentPlaylist);
+                updateChannelList(channels);
                 document.getElementById('channelList').disabled = false;
                 document.getElementById('pipBtn').disabled = false;
-                showStatus('Playlist loaded');
+                showStatus(`Loaded ${channels.length} channels`);
             } catch (error) {
-                showStatus(`Error: ${error.message}`, true);
+                showStatus(`Playlist error: ${error.message}`, true);
+                throw error;
             }
+        }
+
+        function parsePlaylist(data) {
+            const channels = [];
+            const lines = data.split('\n');
+            let currentChannel = null;
+
+            lines.forEach(line => {
+                line = line.trim();
+                
+                // Detect channel info
+                if (line.startsWith('#EXTINF:-1')) {
+                    currentChannel = {
+                        name: line.match(/tvg-name="([^"]+)"/)?.[1] ||
+                              line.split(',')[1]?.trim() ||
+                              'Unknown Channel',
+                        url: null
+                    };
+                }
+                // Capture URL following EXTINF line
+                else if (currentChannel && line.startsWith('http')) {
+                    currentChannel.url = line.trim();
+                    channels.push(currentChannel);
+                    currentChannel = null;
+                }
+            });
+
+            return channels;
         }
 
         async function playStream(url) {
             try {
                 showStatus('Loading stream...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                
-                await player.load(proxyUrl, null, 'application/x-mpegurl');
+                await player.load(url);
                 showStatus('Playing...');
                 
-                await videoPlayer.play().catch(() => {
+                try {
+                    await videoPlayer.play();
+                } catch (playError) {
                     showStatus('Click the player to start playback', true);
-                });
+                }
             } catch (error) {
-                showStatus(`Playback error: ${error.message}`, true);
+                showStatus(`Playback failed: ${error.message}`, true);
+                throw error;
             }
         }
 
-        function parsePlaylist(data) {
-            return data.split('\n').reduce((channels, line, index, lines) => {
-                if (line.startsWith('#EXTINF:-1')) {
-                    const nextLine = lines[index + 1];
-                    if (nextLine && nextLine.startsWith('http')) {
-                        const name = line.match(/tvg-name="([^"]+)/)?.[1] || 
-                                   line.split(',')[1]?.trim() || `Channel ${channels.length + 1}`;
-                        channels.push({
-                            name: name,
-                            url: nextLine.trim()
-                        });
-                    }
+        async function fetchWithRetry(url, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                    const response = await fetch(proxyUrl);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response;
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
                 }
-                return channels;
-            }, []);
-        }
-
-        function onPlayerError(event) {
-            showStatus(`Player error: ${event.detail.message}`, true);
-        }
-
-        async function fetchWithTimeout(resource, timeout = 15000) {
-            const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), timeout);
-            try {
-                const response = await fetch(resource, {
-                    signal: controller.signal  
-                });
-                clearTimeout(id);
-                return response;
-            } catch (error) {
-                clearTimeout(id);
-                throw error;
             }
         }
 
         function updateChannelList(channels) {
             const channelList = document.getElementById('channelList');
             channelList.innerHTML = '<option value="">Select Channel</option>';
+            
             channels.forEach(channel => {
                 const option = document.createElement('option');
                 option.value = channel.url;
@@ -203,34 +212,38 @@
             status.style.color = isError ? '#ff453a' : '#888';
         }
 
-        // Initialize player and load default playlist
-        initPlayer();
-
-        // Event Listeners
-        document.getElementById('loadPlaylist').addEventListener('click', () => {
-            if (document.getElementById('playlistUrl').checkValidity()) {
-                loadPlaylist(document.getElementById('playlistUrl').value);
-            }
-        });
-
-        document.getElementById('channelList').addEventListener('change', (e) => {
-            if (e.target.value) playStream(e.target.value);
-        });
-
-        document.getElementById('pipBtn').addEventListener('click', async () => {
+        // Initialize application
+        (async function() {
             try {
-                if (document.pictureInPictureElement) {
-                    await document.exitPictureInPicture();
-                } else if (document.fullscreenElement) {
-                    await document.exitFullscreen();
-                    await videoPlayer.requestPictureInPicture();
-                } else {
-                    await videoPlayer.requestPictureInPicture();
-                }
+                await shaka.polyfill.installAll();
+                await initPlayer();
+                
+                // Event Listeners
+                document.getElementById('loadPlaylist').addEventListener('click', async () => {
+                    const url = document.getElementById('playlistUrl').value;
+                    if (url) await loadPlaylist(url);
+                });
+
+                document.getElementById('channelList').addEventListener('change', async (e) => {
+                    if (e.target.value) await playStream(e.target.value);
+                });
+
+                document.getElementById('pipBtn').addEventListener('click', async () => {
+                    try {
+                        if (document.pictureInPictureElement) {
+                            await document.exitPictureInPicture();
+                        } else {
+                            await videoPlayer.requestPictureInPicture();
+                        }
+                    } catch (error) {
+                        showStatus(`PiP error: ${error.message}`, true);
+                    }
+                });
+
             } catch (error) {
-                showStatus(`PiP failed: ${error.message}`, true);
+                showStatus(`Initialization failed: ${error.message}`, true);
             }
-        });
+        })();
     </script>
 </body>
 </html>
