@@ -5,29 +5,96 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>IPTV Streamer</title>
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        /* Previous styles remain unchanged */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, sans-serif;
+            background: #1a1a1a; 
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        video {
+            width: 100%;
+            background: black;
+            flex-grow: 1;
+        }
+        .controls {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        input, select, button {
+            padding: 0.8rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            background: #333;
+            color: white;
+        }
+        input { flex-grow: 1; }
+        button {
+            background: #007AFF;
+            min-width: 80px;
+        }
+        .status {
+            padding: 0.5rem;
+            text-align: center;
+            color: #888;
+        }
     </style>
 </head>
 <body>
-    <!-- Same HTML structure as before -->
+    <video id="player" controls playsinline></video>
     
+    <div class="controls">
+        <div class="input-group">
+            <input type="url" id="playlistUrl" 
+                   placeholder="Enter M3U playlist URL"
+                   value="https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8">
+            <button id="loadPlaylist">Load</button>
+        </div>
+        
+        <div class="input-group">
+            <select id="channelList" disabled>
+                <option value="">Select Channel</option>
+            </select>
+            <button id="pipBtn" disabled>PiP</button>
+        </div>
+    </div>
+    
+    <div class="status" id="status"></div>
+
     <script>
         const player = document.getElementById('player');
         const playlistUrl = document.getElementById('playlistUrl');
         const channelList = document.getElementById('channelList');
+        const pipBtn = document.getElementById('pipBtn');
         let hls = null;
-
-        // Vercel-specific CORS proxy
-        const CORS_PROXY = `https://Simply-iptv.vercel.app/api/proxy?`;
         
+        // Your Vercel proxy URL
+        const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
+
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(() => console.log('Service Worker registered'))
+                .catch(console.error);
+        }
+
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
-                const response = await fetch(CORS_PROXY + url);
-                if (!response.ok) throw new Error('Network error');
+                const response = await fetch(CORS_PROXY + encodeURIComponent(url));
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const data = await response.text();
                 const channels = parsePlaylist(data);
                 updateChannelList(channels);
@@ -39,29 +106,64 @@
             }
         }
 
+        function parsePlaylist(data) {
+            const channels = [];
+            const lines = data.split('\n');
+            
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('#EXTINF:-1')) {
+                    const channel = {
+                        name: lines[i].match(/tvg-name="([^"]+)/)?.[1] || 
+                              lines[i].split(',')[1]?.trim() || `Channel ${channels.length + 1}`,
+                        url: lines[i+1]?.trim()
+                    };
+                    if (channel.url) {
+                        channels.push(channel);
+                        i++; // Skip URL line
+                    }
+                }
+            }
+            return channels;
+        }
+
+        function updateChannelList(channels) {
+            channelList.innerHTML = '<option value="">Select Channel</option>';
+            channels.forEach(channel => {
+                const option = document.createElement('option');
+                option.value = channel.url;
+                option.textContent = channel.name;
+                channelList.appendChild(option);
+            });
+        }
+
         function playStream(url) {
-            showStatus('Initializing stream...');
+            showStatus('Loading stream...');
             if (hls) hls.destroy();
 
-            // Use CORS proxy for HLS streams
-            const finalUrl = url.includes('m3u8') ? CORS_PROXY + url : url;
+            const finalUrl = CORS_PROXY + encodeURIComponent(url);
 
             if (Hls.isSupported()) {
                 hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 0,
                     xhrSetup: function(xhr) {
-                        xhr.withCredentials = false; // Disable credentials for CORS
+                        xhr.withCredentials = false;
                     }
                 });
+                
                 hls.loadSource(finalUrl);
                 hls.attachMedia(player);
                 
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
                     showStatus('Playing...');
-                    player.play();
+                    player.play().catch(error => {
+                        showStatus(`Playback error: ${error.message}`, true);
+                    });
                 });
-                
+
                 hls.on(Hls.Events.ERROR, (event, data) => {
-                    showStatus(`HLS Error: ${data.type}`, true);
+                    showStatus(`Stream error: ${data.type}`, true);
                 });
                 
             } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
@@ -70,12 +172,38 @@
             }
         }
 
-        // Add error listener for native playback
-        player.addEventListener('error', () => {
-            showStatus('Playback Error: ' + player.error.message, true);
+        function showStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.style.color = isError ? '#ff453a' : '#888';
+        }
+
+        // Event Listeners
+        document.getElementById('loadPlaylist').addEventListener('click', () => {
+            if (playlistUrl.checkValidity()) {
+                loadPlaylist(playlistUrl.value);
+            }
         });
 
-        // Rest of the code remains similar
+        channelList.addEventListener('change', () => {
+            if (channelList.value) playStream(channelList.value);
+        });
+
+        pipBtn.addEventListener('click', async () => {
+            try {
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                } else {
+                    await player.requestPictureInPicture();
+                }
+            } catch (error) {
+                showStatus(`PiP failed: ${error.message}`, true);
+            }
+        });
+
+        player.addEventListener('error', () => {
+            showStatus(`Player error: ${player.error?.message}`, true);
+        });
     </script>
 </body>
 </html>
