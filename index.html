@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>IPTV Streamer</title>
+    <title>IPTV Streamer Pro</title>
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
@@ -80,8 +80,10 @@
         const pipBtn = document.getElementById('pipBtn');
         let hls = null;
         
-        // Your Vercel proxy URL
+        // Configuration
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
+        const MAX_RETRIES = 3;
+        let currentRetries = 0;
 
         // Service Worker Registration
         if ('serviceWorker' in navigator) {
@@ -93,37 +95,107 @@
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
-                const response = await fetch(CORS_PROXY + encodeURIComponent(url));
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                const response = await fetchWithTimeout(proxyUrl, 5000);
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
+                
                 const channels = parsePlaylist(data);
+                if (channels.length === 0) throw new Error('No valid channels found');
+                
                 updateChannelList(channels);
                 channelList.disabled = false;
                 pipBtn.disabled = false;
                 showStatus('Playlist loaded');
+                currentRetries = 0;
             } catch (error) {
-                showStatus(`Error: ${error.message}`, true);
+                handleRetry(error, url);
             }
         }
 
         function parsePlaylist(data) {
-            const channels = [];
-            const lines = data.split('\n');
-            
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith('#EXTINF:-1')) {
-                    const channel = {
-                        name: lines[i].match(/tvg-name="([^"]+)/)?.[1] || 
-                              lines[i].split(',')[1]?.trim() || `Channel ${channels.length + 1}`,
-                        url: lines[i+1]?.trim()
-                    };
-                    if (channel.url) {
-                        channels.push(channel);
-                        i++; // Skip URL line
+            return data.split('\n').reduce((channels, line, index, lines) => {
+                if (line.startsWith('#EXTINF:-1')) {
+                    const nextLine = lines[index + 1];
+                    if (nextLine && nextLine.startsWith('http')) {
+                        const name = line.match(/tvg-name="([^"]+)/)?.[1] || 
+                                   line.split(',')[1]?.trim() || `Channel ${channels.length + 1}`;
+                        channels.push({
+                            name: name,
+                            url: nextLine.trim()
+                        });
                     }
                 }
+                return channels;
+            }, []);
+        }
+
+        function playStream(url) {
+            showStatus('Initializing stream...');
+            if (hls) hls.destroy();
+
+            hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                backBufferLength: 0,
+                xhrSetup: (xhr, mediaUrl) => {
+                    xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(mediaUrl)}`, true);
+                }
+            });
+
+            hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+                hls.loadSource(url);
+            });
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                player.play().catch(error => {
+                    showStatus(`Playback error: ${error.message}`, true);
+                });
+                showStatus('Playing...');
+            });
+
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    switch(data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            showStatus('Network error - retrying...');
+                            hls.startLoad();
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            showStatus('Media error - recovering...');
+                            hls.recoverMediaError();
+                            break;
+                        default:
+                            hls.destroy();
+                            break;
+                    }
+                }
+            });
+
+            hls.attachMedia(player);
+        }
+
+        // Utilities
+        async function fetchWithTimeout(resource, timeout = 5000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            const response = await fetch(resource, {
+                signal: controller.signal  
+            });
+            clearTimeout(id);
+            return response;
+        }
+
+        function handleRetry(error, url) {
+            showStatus(`Error: ${error.message}`, true);
+            if (currentRetries < MAX_RETRIES) {
+                currentRetries++;
+                setTimeout(() => loadPlaylist(url), 2000 * currentRetries);
+                showStatus(`Retrying (${currentRetries}/${MAX_RETRIES})...`);
+            } else {
+                currentRetries = 0;
             }
-            return channels;
         }
 
         function updateChannelList(channels) {
@@ -136,42 +208,6 @@
             });
         }
 
-        function playStream(url) {
-            showStatus('Loading stream...');
-            if (hls) hls.destroy();
-
-            const finalUrl = CORS_PROXY + encodeURIComponent(url);
-
-            if (Hls.isSupported()) {
-                hls = new Hls({
-                    enableWorker: true,
-                    lowLatencyMode: true,
-                    backBufferLength: 0,
-                    xhrSetup: function(xhr) {
-                        xhr.withCredentials = false;
-                    }
-                });
-                
-                hls.loadSource(finalUrl);
-                hls.attachMedia(player);
-                
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    showStatus('Playing...');
-                    player.play().catch(error => {
-                        showStatus(`Playback error: ${error.message}`, true);
-                    });
-                });
-
-                hls.on(Hls.Events.ERROR, (event, data) => {
-                    showStatus(`Stream error: ${data.type}`, true);
-                });
-                
-            } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
-                player.src = finalUrl;
-                player.play();
-            }
-        }
-
         function showStatus(message, isError = false) {
             const status = document.getElementById('status');
             status.textContent = message;
@@ -181,6 +217,7 @@
         // Event Listeners
         document.getElementById('loadPlaylist').addEventListener('click', () => {
             if (playlistUrl.checkValidity()) {
+                currentRetries = 0;
                 loadPlaylist(playlistUrl.value);
             }
         });
