@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>IPTV Streamer Pro</title>
+    <title>IPTV Streamer</title>
     <link rel="manifest" href="/manifest.json">
-    <script src="https://cdn.jsdelivr.net/npm/shaka-player@4.5.2/dist/shaka-player.compiled.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -17,14 +17,10 @@
             display: flex;
             flex-direction: column;
         }
-        #videoContainer {
+        video {
             width: 100%;
-            flex-grow: 1;
             background: black;
-        }
-        #videoPlayer {
-            width: 100%;
-            height: 100%;
+            flex-grow: 1;
         }
         .controls {
             padding: 1rem;
@@ -57,9 +53,7 @@
     </style>
 </head>
 <body>
-    <div id="videoContainer">
-        <video id="videoPlayer" playsinline muted autoplay></video>
-    </div>
+    <video id="player" controls playsinline></video>
     
     <div class="controls">
         <div class="input-group">
@@ -81,64 +75,27 @@
 
     <script>
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
-        let player = null;
+        const player = document.getElementById('player');
+        let hls = null;
 
-        async function initializeApp() {
-            try {
-                // Verify Shaka Player is loaded
-                if (!window.shaka) {
-                    throw new Error('Shaka Player failed to load. Please check your internet connection.');
-                }
-
-                // Initialize player
-                const video = document.getElementById('videoPlayer');
-                player = new shaka.Player(video);
-                
-                // Configure player
-                player.configure({
-                    streaming: {
-                        retryParameters: {
-                            maxAttempts: 5,
-                            baseDelay: 1,
-                            backoffFactor: 2,
-                            fuzzFactor: 0.5,
-                            timeout: 15000
-                        },
-                        rebufferingGoal: 10
-                    },
-                    manifest: {
-                        dash: { enabled: false },
-                        hls: { enabled: true }
-                    }
-                });
-
-                // Load default playlist
-                await loadPlaylist(document.getElementById('playlistUrl').value);
-                
-                // Set up event listeners
-                setupEventHandlers();
-
-            } catch (error) {
-                showStatus(`Initialization failed: ${error.message}`, true);
-            }
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js');
         }
 
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
-                const response = await fetchWithRetry(url);
+                const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
                 const data = await response.text();
-                
                 const channels = parsePlaylist(data);
-                if (channels.length === 0) throw new Error('No valid channels found');
                 
                 updateChannelList(channels);
                 document.getElementById('channelList').disabled = false;
                 document.getElementById('pipBtn').disabled = false;
                 showStatus(`Loaded ${channels.length} channels`);
             } catch (error) {
-                showStatus(`Playlist error: ${error.message}`, true);
-                throw error;
+                showStatus(`Error: ${error.message}`, true);
             }
         }
 
@@ -147,63 +104,53 @@
             const lines = data.split('\n');
             let currentChannel = null;
 
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                
-                if (trimmedLine.startsWith('#EXTINF:-1')) {
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('#EXTINF:-1')) {
                     currentChannel = {
-                        name: trimmedLine.match(/tvg-name="([^"]+)"/)?.[1] ||
-                              trimmedLine.split(',')[1]?.trim() ||
-                              'Unknown Channel',
+                        name: trimmed.match(/tvg-name="([^"]+)"/)?.[1] || 
+                              trimmed.split(',')[1]?.trim() || 'Unknown Channel',
                         url: null
                     };
-                } else if (currentChannel && trimmedLine.startsWith('http')) {
-                    currentChannel.url = trimmedLine;
+                } else if (currentChannel && trimmed.startsWith('http')) {
+                    currentChannel.url = trimmed;
                     channels.push(currentChannel);
                     currentChannel = null;
                 }
-            }
-
+            });
             return channels;
         }
 
-        async function playStream(url) {
-            try {
-                showStatus('Loading stream...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                
-                await player.load(proxyUrl);
-                showStatus('Playing...');
-                
-                try {
-                    await videoPlayer.play();
-                } catch (playError) {
-                    showStatus('Click the player to start playback', true);
-                }
-            } catch (error) {
-                showStatus(`Playback failed: ${error.message}`, true);
-                throw error;
+        function playStream(url) {
+            if (hls) {
+                hls.destroy();
             }
-        }
 
-        async function fetchWithRetry(url, retries = 3) {
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                    const response = await fetch(proxyUrl);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    return response;
-                } catch (error) {
-                    if (i === retries - 1) throw error;
-                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+            showStatus('Loading stream...');
+            const finalUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+
+            if (url.includes('.m3u8')) {
+                if (Hls.isSupported()) {
+                    hls = new Hls();
+                    hls.loadSource(finalUrl);
+                    hls.attachMedia(player);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        player.play();
+                        showStatus('Playing...');
+                    });
+                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+                    player.src = finalUrl;
+                    player.play();
                 }
+            } else {
+                player.src = finalUrl;
+                player.play();
             }
         }
 
         function updateChannelList(channels) {
             const channelList = document.getElementById('channelList');
             channelList.innerHTML = '<option value="">Select Channel</option>';
-            
             channels.forEach(channel => {
                 const option = document.createElement('option');
                 option.value = channel.url;
@@ -213,36 +160,34 @@
         }
 
         function showStatus(message, isError = false) {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.style.color = isError ? '#ff453a' : '#888';
+            document.getElementById('status').textContent = message;
+            document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
         }
 
-        function setupEventHandlers() {
-            document.getElementById('loadPlaylist').addEventListener('click', async () => {
-                const url = document.getElementById('playlistUrl').value;
-                if (url) await loadPlaylist(url);
-            });
+        // Event Listeners
+        document.getElementById('loadPlaylist').addEventListener('click', () => {
+            const url = document.getElementById('playlistUrl').value;
+            if (url) loadPlaylist(url);
+        });
 
-            document.getElementById('channelList').addEventListener('change', async (e) => {
-                if (e.target.value) await playStream(e.target.value);
-            });
+        document.getElementById('channelList').addEventListener('change', (e) => {
+            if (e.target.value) playStream(e.target.value);
+        });
 
-            document.getElementById('pipBtn').addEventListener('click', async () => {
-                try {
-                    if (document.pictureInPictureElement) {
-                        await document.exitPictureInPicture();
-                    } else {
-                        await videoPlayer.requestPictureInPicture();
-                    }
-                } catch (error) {
-                    showStatus(`PiP error: ${error.message}`, true);
+        document.getElementById('pipBtn').addEventListener('click', async () => {
+            try {
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                } else {
+                    await player.requestPictureInPicture();
                 }
-            });
-        }
+            } catch (error) {
+                showStatus(`PiP Error: ${error.message}`, true);
+            }
+        });
 
-        // Start initialization after DOM loads
-        document.addEventListener('DOMContentLoaded', initializeApp);
+        // Initialize with default playlist
+        loadPlaylist(document.getElementById('playlistUrl').value);
     </script>
 </body>
 </html>
