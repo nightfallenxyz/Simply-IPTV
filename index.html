@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>IPTV Streamer Pro</title>
     <link rel="manifest" href="/manifest.json">
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -17,9 +17,9 @@
             display: flex;
             flex-direction: column;
         }
-        video {
+        .video-js {
             width: 100%;
-            background: black;
+            height: 60vh;
             flex-grow: 1;
         }
         .controls {
@@ -53,7 +53,7 @@
     </style>
 </head>
 <body>
-    <video id="player" controls playsinline muted autoplay></video>
+    <video-js id="player" class="vjs-default-skin" controls muted playsinline></video-js>
     
     <div class="controls">
         <div class="input-group">
@@ -73,23 +73,26 @@
     
     <div class="status" id="status"></div>
 
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-hls@5.15.0/dist/videojs-contrib-hls.min.js"></script>
     <script>
-        const player = document.getElementById('player');
-        const playlistUrl = document.getElementById('playlistUrl');
-        const channelList = document.getElementById('channelList');
-        const pipBtn = document.getElementById('pipBtn');
-        let hls = null;
-        
-        // Configuration
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
-        const MAX_RETRIES = 5;
-        let currentRetries = 0;
+        let player = null;
+        let currentPlaylist = [];
 
-        // Service Worker Registration
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-                .then(() => console.log('Service Worker registered'))
-                .catch(console.error);
+        // Initialize Video.js player
+        function initPlayer() {
+            player = videojs('player', {
+                html5: {
+                    hls: {
+                        overrideNative: true,
+                        withCredentials: false
+                    }
+                },
+                autoplay: 'muted',
+                controls: true,
+                responsive: true
+            });
         }
 
         async function loadPlaylist(url) {
@@ -101,16 +104,15 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
                 
-                const channels = parsePlaylist(data);
-                if (channels.length === 0) throw new Error('No valid channels found');
+                currentPlaylist = parsePlaylist(data);
+                if (currentPlaylist.length === 0) throw new Error('No valid channels found');
                 
-                updateChannelList(channels);
+                updateChannelList(currentPlaylist);
                 channelList.disabled = false;
                 pipBtn.disabled = false;
                 showStatus('Playlist loaded');
-                currentRetries = 0;
             } catch (error) {
-                handleRetry(error, url);
+                showStatus(`Error: ${error.message}`, true);
             }
         }
 
@@ -132,57 +134,17 @@
         }
 
         function playStream(url) {
-            showStatus('Initializing stream...');
+            showStatus('Loading stream...');
             
-            // Cleanup previous instance
-            if (hls) {
-                hls.destroy();
-                hls = null;
-            }
-
-            // Initialize new HLS instance
-            hls = new Hls({
-                enableWorker: true,
-                autoStartLoad: true,
-                startLevel: 0,
-                capLevelToPlayerSize: true,
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60,
-                xhrSetup: (xhr, mediaUrl) => {
-                    xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(mediaUrl)}`, true);
-                    xhr.timeout = 20000;
-                }
+            player.src({
+                src: `${CORS_PROXY}${encodeURIComponent(url)}`,
+                type: 'application/x-mpegURL'
             });
 
-            hls.attachMedia(player);
-            
-            hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-                hls.loadSource(url);
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    player.play().catch(error => {
-                        showStatus(`Playback start error: ${error.message}`, true);
-                    });
-                    showStatus('Playing...');
+            player.ready(() => {
+                player.play().catch(error => {
+                    showStatus(`Playback error: ${error.message}`, true);
                 });
-            });
-
-            hls.on(Hls.Events.ERROR, (event, data) => {
-                if (data.fatal) {
-                    switch(data.type) {
-                        case Hls.ErrorTypes.NETWORK_ERROR:
-                            showStatus('Network error - retrying...');
-                            hls.startLoad();
-                            break;
-                        case Hls.ErrorTypes.MEDIA_ERROR:
-                            showStatus('Media error - recovering...');
-                            hls.recoverMediaError();
-                            break;
-                        default:
-                            hls.destroy();
-                            showStatus('Fatal error - please reload', true);
-                            break;
-                    }
-                }
             });
         }
 
@@ -201,19 +163,8 @@
             }
         }
 
-        function handleRetry(error, url) {
-            showStatus(`Error: ${error.message}`, true);
-            if (currentRetries < MAX_RETRIES) {
-                currentRetries++;
-                setTimeout(() => loadPlaylist(url), 3000 * currentRetries);
-                showStatus(`Retrying (${currentRetries}/${MAX_RETRIES})...`);
-            } else {
-                currentRetries = 0;
-                showStatus('Max retries reached', true);
-            }
-        }
-
         function updateChannelList(channels) {
+            const channelList = document.getElementById('channelList');
             channelList.innerHTML = '<option value="">Select Channel</option>';
             channels.forEach(channel => {
                 const option = document.createElement('option');
@@ -229,22 +180,27 @@
             status.style.color = isError ? '#ff453a' : '#888';
         }
 
+        // Initialize player on load
+        initPlayer();
+
         // Event Listeners
         document.getElementById('loadPlaylist').addEventListener('click', () => {
-            if (playlistUrl.checkValidity()) {
-                currentRetries = 0;
-                loadPlaylist(playlistUrl.value);
+            if (document.getElementById('playlistUrl').checkValidity()) {
+                loadPlaylist(document.getElementById('playlistUrl').value);
             }
         });
 
-        channelList.addEventListener('change', () => {
-            if (channelList.value) playStream(channelList.value);
+        document.getElementById('channelList').addEventListener('change', (e) => {
+            if (e.target.value) playStream(e.target.value);
         });
 
-        pipBtn.addEventListener('click', async () => {
+        document.getElementById('pipBtn').addEventListener('click', async () => {
             try {
                 if (document.pictureInPictureElement) {
                     await document.exitPictureInPicture();
+                } else if (player.isFullscreen()) {
+                    await player.exitFullscreen();
+                    await player.requestPictureInPicture();
                 } else {
                     await player.requestPictureInPicture();
                 }
@@ -253,8 +209,10 @@
             }
         });
 
-        player.addEventListener('error', () => {
-            showStatus(`Player error: ${player.error?.message}`, true);
+        // Handle player errors
+        player.on('error', () => {
+            const error = player.error();
+            showStatus(`Player error: ${error?.message || 'Unknown error'}`, true);
         });
     </script>
 </body>
