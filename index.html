@@ -53,7 +53,7 @@
     </style>
 </head>
 <body>
-    <video id="player" controls playsinline></video>
+    <video id="player" controls playsinline muted autoplay></video>
     
     <div class="controls">
         <div class="input-group">
@@ -82,7 +82,7 @@
         
         // Configuration
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
-        const MAX_RETRIES = 3;
+        const MAX_RETRIES = 5;
         let currentRetries = 0;
 
         // Service Worker Registration
@@ -96,7 +96,7 @@
             try {
                 showStatus('Loading playlist...');
                 const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                const response = await fetchWithTimeout(proxyUrl, 5000);
+                const response = await fetchWithTimeout(proxyUrl, 15000);
                 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
@@ -133,26 +133,37 @@
 
         function playStream(url) {
             showStatus('Initializing stream...');
-            if (hls) hls.destroy();
+            
+            // Cleanup previous instance
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
 
+            // Initialize new HLS instance
             hls = new Hls({
                 enableWorker: true,
-                lowLatencyMode: true,
-                backBufferLength: 0,
+                autoStartLoad: true,
+                startLevel: 0,
+                capLevelToPlayerSize: true,
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60,
                 xhrSetup: (xhr, mediaUrl) => {
                     xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(mediaUrl)}`, true);
+                    xhr.timeout = 20000;
                 }
             });
 
+            hls.attachMedia(player);
+            
             hls.on(Hls.Events.MEDIA_ATTACHED, () => {
                 hls.loadSource(url);
-            });
-
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                player.play().catch(error => {
-                    showStatus(`Playback error: ${error.message}`, true);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    player.play().catch(error => {
+                        showStatus(`Playback start error: ${error.message}`, true);
+                    });
+                    showStatus('Playing...');
                 });
-                showStatus('Playing...');
             });
 
             hls.on(Hls.Events.ERROR, (event, data) => {
@@ -168,33 +179,37 @@
                             break;
                         default:
                             hls.destroy();
+                            showStatus('Fatal error - please reload', true);
                             break;
                     }
                 }
             });
-
-            hls.attachMedia(player);
         }
 
-        // Utilities
-        async function fetchWithTimeout(resource, timeout = 5000) {
+        async function fetchWithTimeout(resource, timeout = 15000) {
             const controller = new AbortController();
             const id = setTimeout(() => controller.abort(), timeout);
-            const response = await fetch(resource, {
-                signal: controller.signal  
-            });
-            clearTimeout(id);
-            return response;
+            try {
+                const response = await fetch(resource, {
+                    signal: controller.signal  
+                });
+                clearTimeout(id);
+                return response;
+            } catch (error) {
+                clearTimeout(id);
+                throw error;
+            }
         }
 
         function handleRetry(error, url) {
             showStatus(`Error: ${error.message}`, true);
             if (currentRetries < MAX_RETRIES) {
                 currentRetries++;
-                setTimeout(() => loadPlaylist(url), 2000 * currentRetries);
+                setTimeout(() => loadPlaylist(url), 3000 * currentRetries);
                 showStatus(`Retrying (${currentRetries}/${MAX_RETRIES})...`);
             } else {
                 currentRetries = 0;
+                showStatus('Max retries reached', true);
             }
         }
 
