@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>IPTV Streamer</title>
+    <title>IPTV Streamer Pro</title>
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
@@ -68,7 +68,6 @@
                 <option value="">Select Channel</option>
             </select>
             <button id="pipBtn" disabled>PiP</button>
-            <button id="playBtn" disabled>▶️ Play</button>
         </div>
     </div>
     
@@ -79,11 +78,16 @@
         const player = document.getElementById('player');
         let hls = null;
 
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js');
+        }
+
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
                 const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                const response = await fetchWithRetry(proxyUrl);
+                const response = await fetch(proxyUrl);
                 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
@@ -92,56 +96,11 @@
                 if (channels.length === 0) throw new Error('No valid channels found');
                 
                 updateChannelList(channels);
-                enableControls();
+                document.getElementById('channelList').disabled = false;
+                document.getElementById('pipBtn').disabled = false;
                 showStatus(`Loaded ${channels.length} channels`);
-                console.log('Parsed channels:', channels);
             } catch (error) {
                 showStatus(`Error: ${error.message}`, true);
-                console.error('Playlist load error:', error);
-            }
-        }
-
-        async function playStream(url) {
-            try {
-                showStatus('Initializing stream...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                
-                if (hls) {
-                    hls.destroy();
-                    hls = null;
-                }
-
-                if (proxyUrl.includes('.m3u8')) {
-                    if (Hls.isSupported()) {
-                        hls = new Hls({
-                            debug: true,
-                            xhrSetup: (xhr) => {
-                                xhr.withCredentials = false;
-                            }
-                        });
-                        
-                        hls.on(Hls.Events.ERROR, (event, data) => {
-                            console.error('HLS error:', data);
-                            showStatus(`Stream error: ${data.type}`, true);
-                        });
-                        
-                        hls.loadSource(proxyUrl);
-                        hls.attachMedia(player);
-                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                            showStatus('Ready to play');
-                            document.getElementById('playBtn').disabled = false;
-                        });
-                    } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
-                        player.src = proxyUrl;
-                        document.getElementById('playBtn').disabled = false;
-                    }
-                } else {
-                    player.src = proxyUrl;
-                    document.getElementById('playBtn').disabled = false;
-                }
-            } catch (error) {
-                showStatus(`Playback error: ${error.message}`, true);
-                console.error('Playback error:', error);
             }
         }
 
@@ -167,6 +126,67 @@
             return channels;
         }
 
+        async function playStream(url) {
+            try {
+                showStatus('Loading stream...');
+                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                
+                if (hls) {
+                    hls.destroy();
+                    hls = null;
+                }
+
+                if (Hls.isSupported()) {
+                    hls = new Hls({
+                        debug: true,
+                        xhrSetup: (xhr, mediaUrl) => {
+                            xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(mediaUrl)}`, true);
+                        }
+                    });
+
+                    hls.on(Hls.Events.ERROR, (event, data) => {
+                        handlePlaybackError(data);
+                    });
+
+                    hls.loadSource(proxyUrl);
+                    hls.attachMedia(player);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        player.play().catch(() => {
+                            showStatus('Click to start playback', true);
+                        });
+                        showStatus('Playing...');
+                    });
+                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+                    player.src = proxyUrl;
+                    player.play();
+                }
+            } catch (error) {
+                showStatus(`Playback error: ${error.message}`, true);
+            }
+        }
+
+        function handlePlaybackError(data) {
+            console.error('HLS Error:', data);
+            let errorMessage = 'Playback error: ';
+            
+            switch(data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                    errorMessage += `Network error (${data.details})`;
+                    break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                    errorMessage += `Media error (${data.details})`;
+                    hls.recoverMediaError();
+                    break;
+                case Hls.ErrorTypes.KEY_SYSTEM_ERROR:
+                    errorMessage += 'DRM/Key system error';
+                    break;
+                default:
+                    errorMessage += 'Unknown error';
+            }
+            
+            showStatus(errorMessage, true);
+        }
+
         function updateChannelList(channels) {
             const channelList = document.getElementById('channelList');
             channelList.innerHTML = '<option value="">Select Channel</option>';
@@ -183,25 +203,6 @@
             document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
         }
 
-        function enableControls() {
-            document.getElementById('channelList').disabled = false;
-            document.getElementById('pipBtn').disabled = false;
-            document.getElementById('playBtn').disabled = false;
-        }
-
-        async function fetchWithRetry(url, retries = 3) {
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const response = await fetch(url);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    return response;
-                } catch (error) {
-                    if (i === retries - 1) throw error;
-                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
-                }
-            }
-        }
-
         // Event Listeners
         document.getElementById('loadPlaylist').addEventListener('click', () => {
             const url = document.getElementById('playlistUrl').value;
@@ -210,15 +211,6 @@
 
         document.getElementById('channelList').addEventListener('change', (e) => {
             if (e.target.value) playStream(e.target.value);
-        });
-
-        document.getElementById('playBtn').addEventListener('click', async () => {
-            try {
-                await player.play();
-                showStatus('Playing...');
-            } catch (error) {
-                showStatus(`Play failed: ${error.message}`, true);
-            }
         });
 
         document.getElementById('pipBtn').addEventListener('click', async () => {
