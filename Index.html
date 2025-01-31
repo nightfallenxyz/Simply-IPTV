@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>IPTV Streamer</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, sans-serif;
+            background: #1a1a1a; 
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        video {
+            width: 100%;
+            background: black;
+            flex-grow: 1;
+        }
+        
+        .controls {
+            padding: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        select, button {
+            padding: 0.5rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            background: #333;
+            color: white;
+            flex-grow: 1;
+        }
+        
+        button { min-width: 80px; }
+    </style>
+</head>
+<body>
+    <video id="player" controls playsinline></video>
+    
+    <div class="controls">
+        <select id="channelList">
+            <option value="">Select Channel</option>
+        </select>
+        <button id="playPause">▶️</button>
+        <button id="pipBtn">PiP</button>
+    </div>
+
+    <script>
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+
+        const player = document.getElementById('player');
+        const channelList = document.getElementById('channelList');
+        let playlist = [];
+
+        // Load sample playlist (replace with your M3U URL)
+        async function loadPlaylist() {
+            try {
+                const response = await fetch('https://example.com/playlist.m3u');
+                const data = await response.text();
+                parsePlaylist(data);
+            } catch (error) {
+                console.error('Error loading playlist:', error);
+            }
+        }
+
+        function parsePlaylist(data) {
+            const channels = data.split('#EXTINF:-1');
+            channels.forEach(channel => {
+                const nameMatch = channel.match(/tvg-name="([^"]+)/);
+                const urlMatch = channel.match(/http.+/);
+                if (nameMatch && urlMatch) {
+                    const option = document.createElement('option');
+                    option.value = urlMatch[0];
+                    option.textContent = nameMatch[1];
+                    channelList.appendChild(option);
+                }
+            });
+        }
+
+        channelList.addEventListener('change', () => {
+            player.src = channelList.value;
+            player.play();
+        });
+
+        document.getElementById('playPause').addEventListener('click', () => {
+            player.paused ? player.play() : player.pause();
+        });
+
+        document.getElementById('pipBtn').addEventListener('click', async () => {
+            try {
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                } else {
+                    await player.requestPictureInPicture();
+                }
+            } catch (error) {
+                console.error('PiP failed:', error);
+            }
+        });
+
+        // Initialize
+        loadPlaylist();
+    </script>
+</body>
+</html>
