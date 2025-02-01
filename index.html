@@ -148,17 +148,28 @@
             try {
                 showStatus('Loading stream...');
                 const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                
+
                 // Check if the URL is accessible
                 const response = await fetch(proxyUrl, { method: 'HEAD' });
-                if (!response.ok) throw new Error('Stream URL is not accessible');
+                if (!response.ok) throw new Error(`Stream URL is not accessible (HTTP ${response.status})`);
 
                 // Set the source and play
                 await player.load(proxyUrl);
                 showStatus('Playing...');
             } catch (error) {
-                showStatus(`Playback error: ${error.message}`, true);
-                console.error('Playback error:', error);
+                // Handle Shaka Player errors specifically
+                if (error instanceof shaka.util.Error) {
+                    console.error('Shaka Player Error:', error);
+                    showStatus(`Playback error: ${error.code} (${error.message})`, true);
+                } else if (error.message) {
+                    // Handle generic errors
+                    console.error('Playback Error:', error);
+                    showStatus(`Playback error: ${error.message}`, true);
+                } else {
+                    // Handle cases where the error object is not structured properly
+                    console.error('Unknown Playback Error:', error);
+                    showStatus(`Playback error: An unknown error occurred`, true);
+                }
             }
         }
 
@@ -180,7 +191,7 @@
 
         function onPlayerError(error) {
             console.error('Error code', error.code, 'object', error);
-            showStatus(`Player error: ${error.message}`, true);
+            showStatus(`Player error: ${error.code} (${error.message})`, true);
         }
 
         // Initialize player and load default playlist
