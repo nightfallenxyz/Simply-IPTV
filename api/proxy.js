@@ -11,8 +11,6 @@ module.exports = async (req, res) => {
     try {
         // Fetch the resource from the provided URL
         https.get(url, (response) => {
-            const chunks = [];
-
             // Check if the response is successful
             if (response.statusCode !== 200) {
                 throw new Error(`Failed to fetch resource: ${response.statusMessage}`);
@@ -20,18 +18,31 @@ module.exports = async (req, res) => {
 
             // Set appropriate headers for CORS
             res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');
 
-            // Collect the data
-            response.on('data', (chunk) => {
-                chunks.push(chunk);
-            });
+            // Determine the Content-Type based on the file extension or response headers
+            const contentType = getContentType(url, response.headers['content-type']);
+            res.setHeader('Content-Type', contentType);
 
-            // Send the data back to the client
-            response.on('end', () => {
-                const buffer = Buffer.concat(chunks);
-                res.send(buffer);
-            });
+            // Handle binary data (e.g., .ts files)
+            if (contentType.includes('video/MP2T') || contentType.includes('application/octet-stream')) {
+                const chunks = [];
+                response.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+                response.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    res.send(buffer);
+                });
+            } else {
+                // Handle text data (e.g., .m3u8 files)
+                let data = '';
+                response.on('data', (chunk) => {
+                    data += chunk;
+                });
+                response.on('end', () => {
+                    res.send(data);
+                });
+            }
         }).on('error', (error) => {
             throw new Error(`Proxy error: ${error.message}`);
         });
@@ -48,5 +59,21 @@ function isValidUrl(url) {
         return true;
     } catch (err) {
         return false;
+    }
+}
+
+// Helper function to determine the Content-Type
+function getContentType(url, responseContentType) {
+    if (responseContentType) {
+        return responseContentType;
+    }
+
+    // Fallback: Determine Content-Type based on file extension
+    if (url.endsWith('.m3u8')) {
+        return 'application/vnd.apple.mpegurl'; // Correct MIME type for .m3u8
+    } else if (url.endsWith('.ts')) {
+        return 'video/MP2T'; // Correct MIME type for .ts
+    } else {
+        return 'text/plain'; // Default fallback
     }
 }
