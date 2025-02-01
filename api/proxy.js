@@ -2,46 +2,55 @@ const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
     const url = req.query.url;
-
-    // Validate the URL
-    if (!url || !isValidUrl(url)) {
-        return res.status(400).send('Invalid URL');
+    
+    console.log('Received request for URL:', url); // Debugging
+    
+    // Validate URL format
+    if (!url || !isValidHttpUrl(url)) {
+        console.error('Invalid URL:', url);
+        return res.status(400).send('Invalid URL format');
     }
 
     try {
-        // Fetch the resource from the provided URL
+        const startTime = Date.now();
         const response = await fetch(url);
-
-        // Check if the response is successful
+        console.log(`Fetch completed in ${Date.now() - startTime}ms. Status: ${response.status}`);
+        
         if (!response.ok) {
-            throw new Error(`Failed to fetch resource: ${response.statusText}`);
+            console.error('Upstream error:', response.status, response.statusText);
+            return res.status(response.status).send(response.statusText);
         }
 
-        // Set appropriate headers for CORS
+        // Handle binary content properly
+        const contentType = response.headers.get('content-type') || 'text/plain';
+        console.log('Content type detected:', contentType);
+
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'text/plain');
+        res.setHeader('Content-Type', contentType);
 
-        // Handle binary data (e.g., video segments)
-        if (response.headers.get('content-type')?.includes('video') || 
-            response.headers.get('content-type')?.includes('application/octet-stream')) {
-            const buffer = await response.buffer();
-            return res.send(buffer);
+        if (contentType.startsWith('text/')) {
+            const text = await response.text();
+            return res.send(text);
         }
 
-        // Handle text data (e.g., M3U playlists)
-        const data = await response.text();
-        res.send(data);
+        // Handle binary data for Vercel compatibility
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        // For Vercel deployments, use this format for binary responses
+        return res.send(buffer.toString('base64'));
+
     } catch (error) {
         console.error('Proxy error:', error);
-        res.status(500).send(error.message);
+        return res.status(500).send(`Proxy error: ${error.message}`);
     }
 };
 
-// Helper function to validate URLs
-function isValidUrl(url) {
+// Robust URL validation
+function isValidHttpUrl(string) {
     try {
-        new URL(url);
-        return true;
+        const url = new URL(string);
+        return url.protocol === 'http:' || url.protocol === 'https:';
     } catch (err) {
         return false;
     }
