@@ -52,9 +52,7 @@
     </style>
 </head>
 <body>
-    <div id="player">
-        <video id="videoPlayer" controls autoplay muted class="d-none" style="width: 100%; height: 100%;"></video>
-    </div>
+    <video id="videoPlayer" controls autoplay muted style="width: 100%; height: 100%;"></video>
     
     <div class="controls">
         <div class="input-group">
@@ -74,38 +72,35 @@
     
     <div class="status" id="status"></div>
 
-    <!-- Shaka Player Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.0/shaka-player.compiled.js"></script>
+    <!-- Include hls.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
     <script>
-        const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
-        let player = null;
+        let hls = null; // Hls.js instance
+        const video = document.getElementById('videoPlayer');
 
-        // Initialize Shaka Player
+        // Initialize Hls.js or use native HLS playback
         function initPlayer() {
-            const video = document.getElementById('videoPlayer');
-            player = new shaka.Player(video);
-
-            // Listen for error events.
-            player.addEventListener('error', onPlayerError);
-
-            // Configure network filters
-            player.getNetworkingEngine().registerRequestFilter(function(type, request) {
-                console.log('Outgoing request:', type, request);
-            });
-
-            player.getNetworkingEngine().registerResponseFilter(function(type, response) {
-                console.log('Incoming response:', type, response);
-            });
-
-            video.classList.remove("d-none");
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Use native HLS playback (Safari, some mobile browsers)
+                showStatus('Using native HLS playback');
+            } else if (Hls.isSupported()) {
+                // Use hls.js for browsers that don't support native HLS
+                hls = new Hls();
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    showStatus(`HLS error: ${data.details}`, true);
+                    console.error('HLS error:', data);
+                });
+                showStatus('Using hls.js for HLS playback');
+            } else {
+                showStatus('HLS is not supported in this browser.', true);
+            }
         }
 
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
-                const response = await fetch(proxyUrl);
+                const response = await fetch(url);
                 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
@@ -147,29 +142,26 @@
         async function playStream(url) {
             try {
                 showStatus('Loading stream...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
 
-                // Check if the URL is accessible
-                const response = await fetch(proxyUrl, { method: 'HEAD' });
-                if (!response.ok) throw new Error(`Stream URL is not accessible (HTTP ${response.status})`);
-
-                // Set the source and play
-                await player.load(proxyUrl);
-                showStatus('Playing...');
-            } catch (error) {
-                // Handle Shaka Player errors specifically
-                if (error instanceof shaka.util.Error) {
-                    console.error('Shaka Player Error:', error);
-                    showStatus(`Playback error: ${error.code} (${error.message})`, true);
-                } else if (error.message) {
-                    // Handle generic errors
-                    console.error('Playback Error:', error);
-                    showStatus(`Playback error: ${error.message}`, true);
+                if (hls) {
+                    // Use hls.js for playback
+                    hls.loadSource(url);
+                    hls.attachMedia(video);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        video.play();
+                        showStatus('Playing...');
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Use native HLS playback
+                    video.src = url;
+                    video.play();
+                    showStatus('Playing...');
                 } else {
-                    // Handle cases where the error object is not structured properly
-                    console.error('Unknown Playback Error:', error);
-                    showStatus(`Playback error: An unknown error occurred`, true);
+                    throw new Error('HLS is not supported in this browser.');
                 }
+            } catch (error) {
+                showStatus(`Playback error: ${error.message}`, true);
+                console.error('Playback error:', error);
             }
         }
 
@@ -189,11 +181,6 @@
             document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
         }
 
-        function onPlayerError(error) {
-            console.error('Error code', error.code, 'object', error);
-            showStatus(`Player error: ${error.code} (${error.message})`, true);
-        }
-
         // Initialize player and load default playlist
         initPlayer();
         loadPlaylist(document.getElementById('playlistUrl').value);
@@ -210,11 +197,10 @@
 
         document.getElementById('pipBtn').addEventListener('click', async () => {
             try {
-                const video = document.getElementById('videoPlayer');
-                if (video.paused) {
-                    showStatus('Start playback first', true);
-                } else {
+                if (!video.paused) {
                     await video.requestPictureInPicture();
+                } else {
+                    showStatus('Start playback first', true);
                 }
             } catch (error) {
                 showStatus(`PiP failed: ${error.message}`, true);
