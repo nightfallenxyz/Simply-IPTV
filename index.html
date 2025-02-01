@@ -134,7 +134,7 @@
                 
                 if (Hls.isSupported()) {
                     hls = new Hls({
-                        debug: false,
+                        debug: true, // Enable debugging
                         enableWorker: true,
                         lowLatencyMode: true,
                         backBufferLength: 30,
@@ -155,9 +155,11 @@
                         }
                     });
 
-                    hls.on(Hls.Events.FRAG_PARSING_ERROR, (event, data) => {
-                        console.error('Fragment parsing error:', data);
-                        handleParsingError(data);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        player.play().catch(() => {
+                            showStatus('Click player to start', true);
+                        });
+                        showStatus('Playing...');
                     });
 
                     hls.on(Hls.Events.ERROR, (event, data) => {
@@ -167,14 +169,6 @@
 
                     hls.loadSource(proxyUrl);
                     hls.attachMedia(player);
-                    
-                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        player.play().catch(() => {
-                            showStatus('Click player to start', true);
-                        });
-                        showStatus('Playing...');
-                    });
-
                 } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
                     player.src = proxyUrl;
                     player.play();
@@ -184,33 +178,14 @@
             }
         }
 
-        function handleParsingError(data) {
-            const errorMap = {
-                1: 'MP4 remux error',
-                2: 'TS container error',
-                3: 'AAC timestamp gap',
-                4: 'AAC PES header error',
-                5: 'MP3 timestamp gap',
-                6: 'Audio track loading error',
-                7: 'Timestamp rollover',
-                8: 'Initialization segment error'
-            };
-            
-            const errorMessage = errorMap[data.reason] || 'Unknown fragment error';
-            showStatus(`Fragment error: ${errorMessage}`, true);
-            
-            // Skip current fragment and reload
-            if (hls) {
-                hls.recoverMediaError();
-                hls.startLoad();
-            }
-        }
-
         function handlePlaybackError(data) {
             let errorMessage = 'Playback error: ';
             switch(data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
                     errorMessage += `Network error (${data.details})`;
+                    if (data.details === 'manifestParsingError') {
+                        errorMessage += ' - Invalid manifest format';
+                    }
                     hls.startLoad();
                     break;
                 case Hls.ErrorTypes.MEDIA_ERROR:
