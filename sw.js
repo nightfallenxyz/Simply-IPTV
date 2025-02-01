@@ -1,4 +1,4 @@
-const CACHE_NAME = 'iptv-v0';
+const CACHE_NAME = 'iptv-v1';
 const ASSETS = [
     '/',
     '/index.html',
