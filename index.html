@@ -6,8 +6,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>IPTV Streamer Pro</title>
     <link rel="manifest" href="/manifest.json">
-    <!-- Video.js CSS -->
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <!-- JW Player CSS -->
+    <link rel="stylesheet" href="https://cdn.jwplayer.com/libraries/ABC123.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -18,7 +18,7 @@
             display: flex;
             flex-direction: column;
         }
-        .video-js {
+        #player {
             width: 100%;
             height: 60vh;
             flex-grow: 1;
@@ -54,7 +54,7 @@
     </style>
 </head>
 <body>
-    <video id="player" class="video-js vjs-default-skin" controls playsinline muted></video>
+    <div id="player"></div>
     
     <div class="controls">
         <div class="input-group">
@@ -74,32 +74,27 @@
     
     <div class="status" id="status"></div>
 
-    <!-- Video.js and HLS Plugin -->
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-hls@5.15.0/dist/videojs-contrib-hls.min.js"></script>
+    <!-- JW Player Library -->
+    <script src="https://cdn.jwplayer.com/libraries/ABC123.js"></script>
 
     <script>
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
         let player = null;
 
-        // Initialize Video.js player
+        // Initialize JW Player
         function initPlayer() {
-            player = videojs('player', {
-                html5: {
-                    hls: {
-                        overrideNative: true,
-                        withCredentials: false
-                    }
-                },
-                autoplay: 'muted',
+            player = jwplayer('player').setup({
+                autostart: true,
                 controls: true,
-                responsive: true
+                mute: true,
+                width: '100%',
+                height: '100%',
+                stretching: 'fill'
             });
 
             // Handle player errors
-            player.on('error', () => {
-                const error = player.error();
-                showStatus(`Player error: ${error?.message || 'Unknown error'}`, true);
+            player.on('error', (error) => {
+                showStatus(`Player error: ${error.message}`, true);
                 console.error('Player error:', error);
             });
         }
@@ -157,17 +152,13 @@
                 if (!response.ok) throw new Error('Stream URL is not accessible');
 
                 // Set the source and play
-                player.src({
-                    src: proxyUrl,
-                    type: 'application/x-mpegURL'
+                player.load({
+                    file: proxyUrl,
+                    type: 'hls'
                 });
 
-                player.ready(() => {
-                    player.play().catch(() => {
-                        showStatus('Click player to start', true);
-                    });
-                    showStatus('Playing...');
-                });
+                player.play();
+                showStatus('Playing...');
             } catch (error) {
                 showStatus(`Playback error: ${error.message}`, true);
                 console.error('Playback error:', error);
@@ -206,10 +197,10 @@
 
         document.getElementById('pipBtn').addEventListener('click', async () => {
             try {
-                if (document.pictureInPictureElement) {
-                    await document.exitPictureInPicture();
+                if (player.getState() === 'playing') {
+                    player.requestPictureInPicture();
                 } else {
-                    await player.requestPictureInPicture();
+                    showStatus('Start playback first', true);
                 }
             } catch (error) {
                 showStatus(`PiP failed: ${error.message}`, true);
