@@ -8,16 +8,118 @@
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        /* Previous styles remain unchanged */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, sans-serif;
+            background: #1a1a1a; 
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        video {
+            width: 100%;
+            background: black;
+            flex-grow: 1;
+        }
+        .controls {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        input, select, button {
+            padding: 0.8rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            background: #333;
+            color: white;
+        }
+        input { flex-grow: 1; }
+        button {
+            background: #007AFF;
+            min-width: 80px;
+        }
+        .status {
+            padding: 0.5rem;
+            text-align: center;
+            color: #888;
+        }
     </style>
 </head>
 <body>
-    <!-- HTML structure remains the same -->
+    <video id="player" controls playsinline muted></video>
     
+    <div class="controls">
+        <div class="input-group">
+            <input type="url" id="playlistUrl" 
+                   placeholder="Enter M3U playlist URL"
+                   value="https://raw.githubusercontent.com/nightfallenxyz/files/refs/heads/main/notpiracy.m3u">
+            <button id="loadPlaylist">Load</button>
+        </div>
+        
+        <div class="input-group">
+            <select id="channelList" disabled>
+                <option value="">Select Channel</option>
+            </select>
+            <button id="pipBtn" disabled>PiP</button>
+        </div>
+    </div>
+    
+    <div class="status" id="status"></div>
+
     <script>
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
         const player = document.getElementById('player');
         let hls = null;
+
+        async function loadPlaylist(url) {
+            try {
+                showStatus('Loading playlist...');
+                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                const response = await fetch(proxyUrl);
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.text();
+                
+                const channels = parsePlaylist(data, url);
+                if (channels.length === 0) throw new Error('No valid channels found');
+                
+                updateChannelList(channels);
+                document.getElementById('channelList').disabled = false;
+                document.getElementById('pipBtn').disabled = false;
+                showStatus(`Loaded ${channels.length} channels`);
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, true);
+            }
+        }
+
+        function parsePlaylist(data, baseUrl) {
+            const channels = [];
+            const lines = data.split('\n');
+            let currentChannel = null;
+
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('#EXTINF:-1')) {
+                    currentChannel = {
+                        name: trimmed.match(/tvg-name="([^"]+)"/)?.[1] || 
+                              trimmed.split(',')[1]?.trim() || 'Unknown Channel',
+                        url: null
+                    };
+                } else if (currentChannel && trimmed.startsWith('http')) {
+                    currentChannel.url = new URL(trimmed, baseUrl).href;
+                    channels.push(currentChannel);
+                    currentChannel = null;
+                }
+            });
+            return channels;
+        }
 
         async function playStream(url) {
             try {
@@ -38,7 +140,7 @@
                         backBufferLength: 30,
                         maxBufferLength: 60,
                         maxMaxBufferLength: 120,
-                        maxBufferSize: 60 * 1000 * 1000, // 60MB
+                        maxBufferSize: 60 * 1000 * 1000, // 60MB buffer
                         liveSyncDuration: 30,
                         liveMaxLatencyDuration: 120,
                         xhrSetup: (xhr, mediaUrl) => {
@@ -47,14 +149,10 @@
                         },
                         fragLoading: {
                             default: 'lowLatency',
-                            timeout: 10000,
-                            maxRetry: 3,
-                            retryDelay: 1000
+                            timeout: 10000, // 10s timeout
+                            maxRetry: 3,    // 3 retry attempts
+                            retryDelay: 1000 // 1s between retries
                         }
-                    });
-
-                    hls.on(Hls.Events.FRAG_PARSING_DATA, (event, data) => {
-                        console.log('Fragment data:', data);
                     });
 
                     hls.on(Hls.Events.FRAG_PARSING_ERROR, (event, data) => {
@@ -65,10 +163,6 @@
                     hls.on(Hls.Events.ERROR, (event, data) => {
                         console.error('HLS Error:', data);
                         handlePlaybackError(data);
-                    });
-
-                    hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
-                        console.log('Fragment loaded:', data.frag.url);
                     });
 
                     hls.loadSource(proxyUrl);
@@ -132,7 +226,46 @@
             showStatus(errorMessage, true);
         }
 
-        // Rest of the code remains the same
+        function updateChannelList(channels) {
+            const channelList = document.getElementById('channelList');
+            channelList.innerHTML = '<option value="">Select Channel</option>';
+            channels.forEach(channel => {
+                const option = document.createElement('option');
+                option.value = channel.url;
+                option.textContent = channel.name;
+                channelList.appendChild(option);
+            });
+        }
+
+        function showStatus(message, isError = false) {
+            document.getElementById('status').textContent = message;
+            document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
+        }
+
+        // Event Listeners
+        document.getElementById('loadPlaylist').addEventListener('click', () => {
+            const url = document.getElementById('playlistUrl').value;
+            if (url) loadPlaylist(url);
+        });
+
+        document.getElementById('channelList').addEventListener('change', (e) => {
+            if (e.target.value) playStream(e.target.value);
+        });
+
+        document.getElementById('pipBtn').addEventListener('click', async () => {
+            try {
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                } else {
+                    await player.requestPictureInPicture();
+                }
+            } catch (error) {
+                showStatus(`PiP failed: ${error.message}`, true);
+            }
+        });
+
+        // Initialize with default playlist
+        loadPlaylist(document.getElementById('playlistUrl').value);
     </script>
 </body>
 </html>
