@@ -95,6 +95,13 @@
                 controls: true,
                 responsive: true
             });
+
+            // Handle player errors
+            player.on('error', () => {
+                const error = player.error();
+                showStatus(`Player error: ${error?.message || 'Unknown error'}`, true);
+                console.error('Player error:', error);
+            });
         }
 
         async function loadPlaylist(url) {
@@ -145,6 +152,11 @@
                 showStatus('Loading stream...');
                 const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
                 
+                // Check if the URL is accessible
+                const response = await fetch(proxyUrl, { method: 'HEAD' });
+                if (!response.ok) throw new Error('Stream URL is not accessible');
+
+                // Set the source and play
                 player.src({
                     src: proxyUrl,
                     type: 'application/x-mpegURL'
@@ -158,6 +170,7 @@
                 });
             } catch (error) {
                 showStatus(`Playback error: ${error.message}`, true);
+                console.error('Playback error:', error);
             }
         }
 
@@ -201,12 +214,6 @@
             } catch (error) {
                 showStatus(`PiP failed: ${error.message}`, true);
             }
-        });
-
-        // Handle player errors
-        player.on('error', () => {
-            const error = player.error();
-            showStatus(`Player error: ${error?.message || 'Unknown error'}`, true);
         });
     </script>
 </body>
