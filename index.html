@@ -6,7 +6,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>IPTV Streamer Pro</title>
     <link rel="manifest" href="/manifest.json">
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <!-- Video.js CSS -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -17,9 +18,9 @@
             display: flex;
             flex-direction: column;
         }
-        video {
+        .video-js {
             width: 100%;
-            background: black;
+            height: 60vh;
             flex-grow: 1;
         }
         .controls {
@@ -53,7 +54,7 @@
     </style>
 </head>
 <body>
-    <video id="player" controls playsinline muted></video>
+    <video id="player" class="video-js vjs-default-skin" controls playsinline muted></video>
     
     <div class="controls">
         <div class="input-group">
@@ -73,10 +74,28 @@
     
     <div class="status" id="status"></div>
 
+    <!-- Video.js and HLS Plugin -->
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-hls@5.15.0/dist/videojs-contrib-hls.min.js"></script>
+
     <script>
         const CORS_PROXY = 'https://Simply-iptv.vercel.app/api/proxy?url=';
-        const player = document.getElementById('player');
-        let hls = null;
+        let player = null;
+
+        // Initialize Video.js player
+        function initPlayer() {
+            player = videojs('player', {
+                html5: {
+                    hls: {
+                        overrideNative: true,
+                        withCredentials: false
+                    }
+                },
+                autoplay: 'muted',
+                controls: true,
+                responsive: true
+            });
+        }
 
         async function loadPlaylist(url) {
             try {
@@ -123,82 +142,23 @@
 
         async function playStream(url) {
             try {
-                showStatus('Initializing stream...');
-                
-                if (hls) {
-                    hls.destroy();
-                    hls = null;
-                }
-
+                showStatus('Loading stream...');
                 const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
                 
-                if (Hls.isSupported()) {
-                    hls = new Hls({
-                        debug: true, // Enable debugging
-                        enableWorker: true,
-                        lowLatencyMode: true,
-                        backBufferLength: 30,
-                        maxBufferLength: 60,
-                        maxMaxBufferLength: 120,
-                        maxBufferSize: 60 * 1000 * 1000, // 60MB buffer
-                        liveSyncDuration: 30,
-                        liveMaxLatencyDuration: 120,
-                        xhrSetup: (xhr, mediaUrl) => {
-                            const absoluteUrl = new URL(mediaUrl, url).href;
-                            xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(absoluteUrl)}`, true);
-                        },
-                        fragLoading: {
-                            default: 'lowLatency',
-                            timeout: 10000, // 10s timeout
-                            maxRetry: 3,    // 3 retry attempts
-                            retryDelay: 1000 // 1s between retries
-                        }
-                    });
+                player.src({
+                    src: proxyUrl,
+                    type: 'application/x-mpegURL'
+                });
 
-                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        player.play().catch(() => {
-                            showStatus('Click player to start', true);
-                        });
-                        showStatus('Playing...');
+                player.ready(() => {
+                    player.play().catch(() => {
+                        showStatus('Click player to start', true);
                     });
-
-                    hls.on(Hls.Events.ERROR, (event, data) => {
-                        console.error('HLS Error:', data);
-                        handlePlaybackError(data);
-                    });
-
-                    hls.loadSource(proxyUrl);
-                    hls.attachMedia(player);
-                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
-                    player.src = proxyUrl;
-                    player.play();
-                }
+                    showStatus('Playing...');
+                });
             } catch (error) {
                 showStatus(`Playback error: ${error.message}`, true);
             }
-        }
-
-        function handlePlaybackError(data) {
-            let errorMessage = 'Playback error: ';
-            switch(data.type) {
-                case Hls.ErrorTypes.NETWORK_ERROR:
-                    errorMessage += `Network error (${data.details})`;
-                    if (data.details === 'manifestParsingError') {
-                        errorMessage += ' - Invalid manifest format';
-                    }
-                    hls.startLoad();
-                    break;
-                case Hls.ErrorTypes.MEDIA_ERROR:
-                    errorMessage += `Media error (${data.details})`;
-                    hls.recoverMediaError();
-                    break;
-                case Hls.ErrorTypes.KEY_SYSTEM_ERROR:
-                    errorMessage += 'DRM/Key system error';
-                    break;
-                default:
-                    errorMessage += 'Unknown error';
-            }
-            showStatus(errorMessage, true);
         }
 
         function updateChannelList(channels) {
@@ -216,6 +176,10 @@
             document.getElementById('status').textContent = message;
             document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
         }
+
+        // Initialize player and load default playlist
+        initPlayer();
+        loadPlaylist(document.getElementById('playlistUrl').value);
 
         // Event Listeners
         document.getElementById('loadPlaylist').addEventListener('click', () => {
@@ -239,8 +203,11 @@
             }
         });
 
-        // Initialize with default playlist
-        loadPlaylist(document.getElementById('playlistUrl').value);
+        // Handle player errors
+        player.on('error', () => {
+            const error = player.error();
+            showStatus(`Player error: ${error?.message || 'Unknown error'}`, true);
+        });
     </script>
 </body>
 </html>
