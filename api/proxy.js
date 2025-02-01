@@ -1,43 +1,42 @@
-const fetch = require('node-fetch');
+const https = require('https');
 
 module.exports = async (req, res) => {
-    console.log('Proxy request received'); // Log the request
-
     const url = req.query.url;
-    console.log('Requested URL:', url); // Log the URL
 
+    // Validate the URL
     if (!url || !isValidUrl(url)) {
-        console.error('Invalid URL:', url); // Log invalid URL
         return res.status(400).send('Invalid URL');
     }
 
     try {
-        console.log('Fetching resource from URL:', url); // Log before fetch
-        const response = await fetch(url);
+        // Fetch the resource from the provided URL
+        https.get(url, (response) => {
+            const chunks = [];
 
-        if (!response.ok) {
-            console.error('Fetch failed:', response.status, response.statusText); // Log fetch failure
-            throw new Error(`Failed to fetch resource: ${response.statusText}`);
-        }
+            // Check if the response is successful
+            if (response.statusCode !== 200) {
+                throw new Error(`Failed to fetch resource: ${response.statusMessage}`);
+            }
 
-        // Set CORS headers
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'text/plain');
+            // Set appropriate headers for CORS
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');
 
-        // Handle binary data (e.g., video segments)
-        if (response.headers.get('content-type')?.includes('video') || 
-            response.headers.get('content-type')?.includes('application/octet-stream')) {
-            console.log('Handling binary data'); // Log binary data handling
-            const buffer = await response.buffer();
-            return res.send(buffer);
-        }
+            // Collect the data
+            response.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
 
-        // Handle text data (e.g., M3U playlists)
-        console.log('Handling text data'); // Log text data handling
-        const data = await response.text();
-        res.send(data);
+            // Send the data back to the client
+            response.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                res.send(buffer);
+            });
+        }).on('error', (error) => {
+            throw new Error(`Proxy error: ${error.message}`);
+        });
     } catch (error) {
-        console.error('Proxy error:', error); // Log the error
+        console.error('Proxy error:', error);
         res.status(500).send(error.message);
     }
 };
