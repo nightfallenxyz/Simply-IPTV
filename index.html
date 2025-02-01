@@ -78,11 +78,6 @@
         const player = document.getElementById('player');
         let hls = null;
 
-        // Service Worker Registration
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
-        }
-
         async function loadPlaylist(url) {
             try {
                 showStatus('Loading playlist...');
@@ -92,7 +87,7 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
                 
-                const channels = parsePlaylist(data);
+                const channels = parsePlaylist(data, url);
                 if (channels.length === 0) throw new Error('No valid channels found');
                 
                 updateChannelList(channels);
@@ -104,58 +99,87 @@
             }
         }
 
-        function parsePlaylist(data) {
+        function parsePlaylist(data, baseUrl) {
             const channels = [];
             const lines = data.split('\n');
             let currentChannel = null;
+            let isMasterPlaylist = false;
 
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                if (trimmed.startsWith('#EXTINF:-1')) {
-                    currentChannel = {
-                        name: trimmed.match(/tvg-name="([^"]+)"/)?.[1] || 
-                              trimmed.split(',')[1]?.trim() || 'Unknown Channel',
-                        url: null
-                    };
-                } else if (currentChannel && trimmed.startsWith('http')) {
-                    currentChannel.url = trimmed;
-                    channels.push(currentChannel);
-                    currentChannel = null;
-                }
-            });
+            // Handle master playlists with variants
+            if (data.includes('#EXT-X-STREAM-INF')) {
+                isMasterPlaylist = true;
+                lines.forEach((line, index) => {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('#EXT-X-STREAM-INF')) {
+                        const urlLine = lines[index + 1]?.trim();
+                        if (urlLine && urlLine.startsWith('http')) {
+                            channels.push({
+                                name: `Quality ${channels.length + 1}`,
+                                url: new URL(urlLine, baseUrl).href
+                            });
+                        }
+                    }
+                });
+            }
+
+            // Handle standard channel playlists
+            if (!isMasterPlaylist) {
+                lines.forEach(line => {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('#EXTINF:-1')) {
+                        currentChannel = {
+                            name: trimmed.match(/tvg-name="([^"]+)"/)?.[1] || 
+                                  trimmed.split(',')[1]?.trim() || 'Unknown Channel',
+                            url: null
+                        };
+                    } else if (currentChannel && trimmed.startsWith('http')) {
+                        currentChannel.url = new URL(trimmed, baseUrl).href;
+                        channels.push(currentChannel);
+                        currentChannel = null;
+                    }
+                });
+            }
+
             return channels;
         }
 
         async function playStream(url) {
             try {
-                showStatus('Loading stream...');
-                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                showStatus('Initializing stream...');
                 
                 if (hls) {
                     hls.destroy();
                     hls = null;
                 }
 
+                const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+                
                 if (Hls.isSupported()) {
                     hls = new Hls({
                         debug: true,
                         xhrSetup: (xhr, mediaUrl) => {
-                            xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(mediaUrl)}`, true);
-                        }
+                            const absoluteUrl = new URL(mediaUrl, url).href;
+                            xhr.open('GET', `${CORS_PROXY}${encodeURIComponent(absoluteUrl)}`, true);
+                        },
+                        enableWorker: true,
+                        lowLatencyMode: true,
+                        backBufferLength: 30
                     });
 
                     hls.on(Hls.Events.ERROR, (event, data) => {
+                        console.error('HLS Error:', data);
                         handlePlaybackError(data);
+                    });
+
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        player.play().catch(() => {
+                            showStatus('Click player to start', true);
+                        });
+                        showStatus('Playing...');
                     });
 
                     hls.loadSource(proxyUrl);
                     hls.attachMedia(player);
-                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        player.play().catch(() => {
-                            showStatus('Click to start playback', true);
-                        });
-                        showStatus('Playing...');
-                    });
                 } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
                     player.src = proxyUrl;
                     player.play();
@@ -166,12 +190,11 @@
         }
 
         function handlePlaybackError(data) {
-            console.error('HLS Error:', data);
             let errorMessage = 'Playback error: ';
-            
             switch(data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
                     errorMessage += `Network error (${data.details})`;
+                    hls.startLoad();
                     break;
                 case Hls.ErrorTypes.MEDIA_ERROR:
                     errorMessage += `Media error (${data.details})`;
@@ -183,7 +206,6 @@
                 default:
                     errorMessage += 'Unknown error';
             }
-            
             showStatus(errorMessage, true);
         }
 
