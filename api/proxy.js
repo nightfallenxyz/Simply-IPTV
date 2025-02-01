@@ -1,4 +1,5 @@
 const https = require('https');
+const { URL } = require('url');
 
 module.exports = async (req, res) => {
     const url = req.query.url;
@@ -9,8 +10,11 @@ module.exports = async (req, res) => {
     }
 
     try {
-        // Fetch the resource from the provided URL
-        https.get(url, (response) => {
+        // Fetch the resource from the provided URL with redirect handling
+        const finalUrl = await followRedirects(url);
+        console.log('Final URL after redirects:', finalUrl); // Log the final URL
+
+        https.get(finalUrl, (response) => {
             // Check if the response is successful
             if (response.statusCode !== 200) {
                 throw new Error(`Failed to fetch resource: ${response.statusMessage}`);
@@ -20,7 +24,7 @@ module.exports = async (req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
 
             // Determine the Content-Type based on the file extension or response headers
-            const contentType = getContentType(url, response.headers['content-type']);
+            const contentType = getContentType(finalUrl, response.headers['content-type']);
             res.setHeader('Content-Type', contentType);
 
             // Handle binary data (e.g., .ts files)
@@ -40,6 +44,16 @@ module.exports = async (req, res) => {
                     data += chunk;
                 });
                 response.on('end', () => {
+                    // Resolve relative URLs in .m3u8 playlists
+                    if (contentType.includes('application/vnd.apple.mpegurl')) {
+                        const baseUrl = new URL(finalUrl);
+                        data = data.split('\n').map(line => {
+                            if (line.trim() && !line.startsWith('#')) {
+                                return new URL(line, baseUrl).href;
+                            }
+                            return line;
+                        }).join('\n');
+                    }
                     res.send(data);
                 });
             }
@@ -76,4 +90,39 @@ function getContentType(url, responseContentType) {
     } else {
         return 'text/plain'; // Default fallback
     }
+}
+
+// Helper function to follow redirects
+function followRedirects(url, maxRedirects = 5) {
+    return new Promise((resolve, reject) => {
+        let currentUrl = url;
+        let redirectCount = 0;
+
+        const fetchWithRedirects = (url) => {
+            https.get(url, (response) => {
+                if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                    redirectCount++;
+                    if (redirectCount > maxRedirects) {
+                        reject(new Error(`Too many redirects (max: ${maxRedirects})`));
+                        return;
+                    }
+
+                    // Resolve the redirect location relative to the current URL
+                    const baseUrl = new URL(currentUrl);
+                    const redirectUrl = new URL(response.headers.location, baseUrl).href;
+                    console.log(`Redirecting to: ${redirectUrl}`); // Log the redirect URL
+                    currentUrl = redirectUrl;
+                    fetchWithRedirects(redirectUrl);
+                } else if (response.statusCode === 200) {
+                    resolve(currentUrl);
+                } else {
+                    reject(new Error(`Failed to fetch resource: ${response.statusMessage}`));
+                }
+            }).on('error', (error) => {
+                reject(error);
+            });
+        };
+
+        fetchWithRedirects(currentUrl);
+    });
 }
