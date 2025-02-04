@@ -1,7 +1,7 @@
 #EXTM3U
 
 #EXTINF:-1 tvg-id="Cartoon.Network.USA.-.Eastern.Feed.us" tvg-name="CARTOON NETWORK" tvg-logo="http://schedulesdirect-api20141201-logos.s3.dualstack.us-east-1.amazonaws.com/stationLogos/s12131_dark_360w_270h.png" group-title="Kids",CARTOON NETWORK
-http://fl2.moveonjoy.com/CARTOON_NETWORK/index.m3u8
+http://84.17.40.25/CARTOON_NETWORK/index.m3u8
 
 #EXTINF:-1,Nickelodeon [East]
 http://fl1.moveonjoy.com/NICKELODEON/index.m3u8
