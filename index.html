@@ -88,7 +88,7 @@
                 // Use hls.js for browsers that don't support native HLS
                 hls = new Hls();
                 hls.on(Hls.Events.ERROR, (event, data) => {
-                    showStatus(`HLS error: ${data.details} https://tv.devimontreal.com/tutorial.mp4 likely has a fix`, true);
+                    showStatus(`HLS error: ${data.details} <https://tv.devimontreal.com/tutorial.mp4> likely has a fix`, true);
                     console.error('HLS error:', data);
                 });
                 showStatus('Using hls.js for HLS playback');
