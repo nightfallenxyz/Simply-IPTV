@@ -8,9 +8,9 @@
     <link rel="manifest" href="/manifest.json">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        body {
             font-family: -apple-system, sans-serif;
-            background: #1a1a1a; 
+            background: #1a1a1a;
             color: white;
             height: 100vh;
             display: flex;
@@ -53,15 +53,15 @@
 </head>
 <body>
     <video id="videoPlayer" controls autoplay muted style="width: 100%; height: 100%;"></video>
-    
+
     <div class="controls">
         <div class="input-group">
-            <input type="url" id="playlistUrl" 
+            <input type="url" id="playlistUrl"
                    placeholder="Enter M3U playlist URL"
                    value="https://tv.devimontreal.com/playlist.m3u">
             <button id="loadPlaylist">Load</button>
         </div>
-        
+
         <div class="input-group">
             <select id="channelList" disabled>
                 <option value="">Select Channel</option>
@@ -69,7 +69,7 @@
             <button id="pipBtn" disabled>PiP</button>
         </div>
     </div>
-    
+
     <div class="status" id="status"></div>
 
     <!-- Include hls.js library -->
@@ -88,7 +88,7 @@
                 // Use hls.js for browsers that don't support native HLS
                 hls = new Hls();
                 hls.on(Hls.Events.ERROR, (event, data) => {
-                    showStatus(`HLS error: ${data.details} <https://tv.devimontreal.com/tutorial.mp4> likely has a fix`, true);
+                    showStatus('HLS error: ' + data.details + ' <a href="https://tv.devimontreal.com/tutorial.mp4" target="_blank">likely has a fix</a>', true);
                     console.error('HLS error:', data);
                 });
                 showStatus('Using hls.js for HLS playback');
@@ -101,13 +101,13 @@
             try {
                 showStatus('Loading playlist...');
                 const response = await fetch(url);
-                
+
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.text();
-                
+
                 const channels = parsePlaylist(data, url);
                 if (channels.length === 0) throw new Error('No valid channels found');
-                
+
                 updateChannelList(channels);
                 document.getElementById('channelList').disabled = false;
                 document.getElementById('pipBtn').disabled = false;
@@ -126,7 +126,7 @@
                 const trimmed = line.trim();
                 if (trimmed.startsWith('#EXTINF:-1')) {
                     currentChannel = {
-                        name: trimmed.match(/tvg-name="([^"]+)"/)?.[1] || 
+                        name: trimmed.match(/tvg-name="([^"]+)"/)?.[1] ||
                               trimmed.split(',')[1]?.trim() || 'Unknown Channel',
                         url: null
                     };
@@ -177,8 +177,12 @@
         }
 
         function showStatus(message, isError = false) {
-            document.getElementById('status').textContent = message;
-            document.getElementById('status').style.color = isError ? '#ff453a' : '#888';
+            const statusElement = document.getElementById('status');
+            if (isError) {
+                statusElement.innerHTML = `<span style="color: #ff453a;">${message}</span>`;
+            } else {
+                statusElement.innerHTML = `<span style="color: #888;">${message}</span>`;
+            }
         }
 
         // Initialize player and load default playlist
