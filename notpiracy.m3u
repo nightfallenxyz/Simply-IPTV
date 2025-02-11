@@ -1,6 +1,6 @@
 #EXTM3U
 #EXTINF:-1,CARTOON NETWORK
-https://fl2.moveonjoy.com/CARTOON_NETWORK/index.m3u8
+http://fl2.moveonjoy.com/CARTOON_NETWORK/index.m3u8
 #EXTINF:-1,Nickelodeon [East]
 http://fl1.moveonjoy.com/NICKELODEON/index.m3u8
 
@@ -8,7 +8,7 @@ http://fl1.moveonjoy.com/NICKELODEON/index.m3u8
 http://fl3.moveonjoy.com/Comedy_Central/index.m3u8
 
 #EXTINF:-1,Adult Swin [East]
-https://turnerlive.warnermediacdn.com/hls/live/2023183/aseast/noslate/VIDEO_1_5128000.m3u8
+http://turnerlive.warnermediacdn.com/hls/live/2023183/aseast/noslate/VIDEO_1_5128000.m3u8
 #EXTINF:-1,Nicktoons
 http://143.244.60.30/NICKTOONS/index.m3u8
 #EXTINF:-1,Cnn
