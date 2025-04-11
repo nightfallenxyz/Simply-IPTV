@@ -57,8 +57,7 @@
     <div class="controls">
         <div class="input-group">
             <input type="url" id="playlistUrl"
-                   placeholder="Enter M3U playlist URL"
-                   value="https://tv.devimontreal.com/playlist.m3u">
+                   placeholder="Enter M3U playlist URL">
             <button id="loadPlaylist">Load</button>
         </div>
 
@@ -78,6 +77,11 @@
     <script>
         let hls = null; // Hls.js instance
         const video = document.getElementById('videoPlayer');
+        
+        // Get current host URL and set default playlist URL
+        const currentHost = window.location.href.split('/').slice(0, 3).join('/');
+        const defaultPlaylistUrl = currentHost + '/playlist.m3u';
+        document.getElementById('playlistUrl').value = defaultPlaylistUrl;
 
         // Initialize Hls.js or use native HLS playback
         function initPlayer() {
@@ -187,7 +191,7 @@
 
         // Initialize player and load default playlist
         initPlayer();
-        loadPlaylist(document.getElementById('playlistUrl').value);
+        loadPlaylist(defaultPlaylistUrl);
 
         // Event Listeners
         document.getElementById('loadPlaylist').addEventListener('click', () => {
