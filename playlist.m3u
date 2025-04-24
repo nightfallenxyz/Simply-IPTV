@@ -7,7 +7,7 @@ https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://fl1.moveonjoy.com/NICKELOD
 #EXTINF:-1,Comedy Central [East]
 https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://fl3.moveonjoy.com/Comedy_Central/index.m3u8
 #EXTINF:-1,Test
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://fl1.moveonjoy.com/NICKELODEON/index.m3u8
+https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://87.106.44.40:6284/live.m3u8
 
 #EXTINF:-1,Adult Swin [East]
 https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://turnerlive.warnermediacdn.com/hls/live/2023183/aseast/noslate/VIDEO_1_5128000.m3u8
