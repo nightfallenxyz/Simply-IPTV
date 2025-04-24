@@ -1,19 +1,17 @@
 #EXTM3U
 #EXTINF:-1,CARTOON NETWORK
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://fl2.moveonjoy.com/CARTOON_NETWORK/index.m3u8
+http://fl2.moveonjoy.com/CARTOON_NETWORK/index.m3u8
 #EXTINF:-1,Nickelodeon [East]
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://fl1.moveonjoy.com/NICKELODEON/index.m3u8
+http://fl1.moveonjoy.com/NICKELODEON/index.m3u8
 
 #EXTINF:-1,Comedy Central [East]
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://fl3.moveonjoy.com/Comedy_Central/index.m3u8
+http://fl3.moveonjoy.com/Comedy_Central/index.m3u8
 #EXTINF:-1,Test
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://87.106.44.40:6284/live.m3u8
+http://87.106.44.40:6284/live.m3u8
 
 #EXTINF:-1,Adult Swin [East]
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://turnerlive.warnermediacdn.com/hls/live/2023183/aseast/noslate/VIDEO_1_5128000.m3u8
+http://turnerlive.warnermediacdn.com/hls/live/2023183/aseast/noslate/VIDEO_1_5128000.m3u8
 #EXTINF:-1,Nicktoons
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=http://143.244.60.30/NICKTOONS/index.m3u8
+http://143.244.60.30/NICKTOONS/index.m3u8
 #EXTINF:-1,Cnn
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=https://turnerlive.warnermediacdn.com/hls/live/586495/cnngo/cnn_slate/VIDEO_0_3564000.m3u8
-#EXTINF:-1,CBS Tampa
-https://ye-dusky-ten.vercel.app/m3u8-proxy?url=https://cbsplaylistserver.aws.syncbak.com/mpl/20160401/859169/5743360/media.m3u8?request_token=qvU7-FK2v-GKFp6gT19Ca6OGg-7v2h3rb7CH8dJb24xGNa9SybZzeslmzXfSuKr8yvmFHpHArbAEAylrbjN8plkYyR_E_ONwoEO5VbCnWRbPltjgakUcV3v7Ap37IjAJykCk5YrCty_Hx7AsXhusoGCdNFX5UwEk7oT3u6_r2xG4QXk&CMCD=mtp%3D9500%2Cot%3Dm%2Csf%3Dh%2Csid%3D%224e546942-2006-495c-a946-06b8f3a0faca%22
+https://turnerlive.warnermediacdn.com/hls/live/586495/cnngo/cnn_slate/VIDEO_0_3564000.m3u8
